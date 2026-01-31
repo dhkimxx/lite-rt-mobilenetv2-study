@@ -1,0 +1,19 @@
+Model,Filename,Backend,Latency (ms)
+C0,mobilenet_v2_c0.tflite,CPU-1T,70.9436
+C0,mobilenet_v2_c0.tflite,CPU-4T,32.3545
+C0,mobilenet_v2_c0.tflite,GPU,16.5592
+C1,mobilenet_v2_c1.tflite,CPU-1T,70.7296
+C1,mobilenet_v2_c1.tflite,CPU-4T,31.5988
+C1,mobilenet_v2_c1.tflite,GPU,
+C2,mobilenet_v2_c2.tflite,CPU-1T,69.2047
+C2,mobilenet_v2_c2.tflite,CPU-4T,94.56110000000001
+C2,mobilenet_v2_c2.tflite,GPU,16.284299999999998
+C3-C,mobilenet_v2_c3_c.tflite,CPU-1T,43.1782
+C3-C,mobilenet_v2_c3_c.tflite,CPU-4T,20.5062
+C3-C,mobilenet_v2_c3_c.tflite,GPU,19.0398
+C4,mobilenet_v2_c4.tflite,CPU-1T,43.064800000000005
+C4,mobilenet_v2_c4.tflite,CPU-4T,21.9591
+C4,mobilenet_v2_c4.tflite,GPU,19.138099999999998
+C5,mobilenet_v2_c5.tflite,CPU-1T,43.1175
+C5,mobilenet_v2_c5.tflite,CPU-4T,20.7745
+C5,mobilenet_v2_c5.tflite,GPU,18.9285
