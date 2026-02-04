@@ -18,7 +18,7 @@
 ### 2.2. 모델 및 데이터셋
 
 - **Model**: MobileNetV2 (Pre-trained on ImageNet)
-- **Calibration Dataset**: CIFAR-10 (Resized to 224x224, 100~500 samples)
+- **Calibration Dataset**: ImageNet-V2 (Matched Frequency, 1000 classes, 10k images)
 - **Metrics**:
   - **MSE (Mean Squared Error)**: 원본 FP32 모델과의 출력 텐서 차이
   - **SNR (Signal-to-Noise Ratio)**: 양자화 노이즈 대비 신호 비율 (dB)

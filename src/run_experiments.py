@@ -17,57 +17,29 @@ RESULTS_CSV = "results/experiment_results.csv"
 MODEL_FLOAT = "models/mobilenet_v2_float.tflite"
 
 EXPERIMENTAL_CASES = [
-    {"id": "C0", "name": "Baseline", "type": "fp32", "data": None, "samples": 0},
-    {
-        "id": "C1",
-        "name": "Weight-Only",
-        "type": "weight_only",
-        "data": None,
-        "samples": 0,
-    },
-    {"id": "C2", "name": "Dynamic", "type": "dynamic", "data": None, "samples": 0},
-    {
-        "id": "C3-A",
-        "name": "Static-Random-100",
-        "type": "static",
-        "data": "random",
-        "samples": 100,
-    },
-    {
-        "id": "C3-B",
-        "name": "Static-Real-10",
-        "type": "static",
-        "data": "random",
-        "samples": 10,
-    },
-    {
-        "id": "C3-C",
-        "name": "Static-Real-100",
-        "type": "static",
-        "data": "random",
-        "samples": 100,
-    },
-    {
-        "id": "C3-D",
-        "name": "Static-Real-500",
-        "type": "static",
-        "data": "random",
-        "samples": 500,
-    },
-    {
-        "id": "C4",
-        "name": "Full-Integer",
-        "type": "full_int",
-        "data": "random",
-        "samples": 100,
-    },
-    {
-        "id": "C5",
-        "name": "Per-Tensor",
-        "type": "per_tensor",
-        "data": "random",
-        "samples": 100,
-    },
+    {"id": "C0", "name": "Baseline", "type": "fp32", "w_bits": 32, "a_bits": 32, "data": None, "samples": 0},
+    # 1. Weight-Only (W8/W4/W16)
+    {"id": "W8A32", "name": "Weight-Only-8", "type": "weight_only", "w_bits": 8, "a_bits": 32, "data": None, "samples": 0},
+    {"id": "W4A32", "name": "Weight-Only-4", "type": "weight_only", "w_bits": 4, "a_bits": 32, "data": None, "samples": 0},
+    {"id": "W16A32", "name": "Weight-Only-16", "type": "weight_only", "w_bits": 16, "a_bits": 32, "data": None, "samples": 0},
+    
+    # 2. Dynamic (W8A16/W8A8)
+    {"id": "W8A16", "name": "Dynamic-W8A16", "type": "dynamic", "w_bits": 8, "a_bits": 16, "data": None, "samples": 0},
+    {"id": "W8A8D", "name": "Dynamic-W8A8", "type": "dynamic", "w_bits": 8, "a_bits": 8, "data": None, "samples": 0},
+
+    # 3. Static Strategy Variables (W8A8 base)
+    {"id": "W8A8-R100", "name": "Static-Random-100", "type": "static", "w_bits": 8, "a_bits": 8, "data": "random", "samples": 100},
+    {"id": "W8A8-V10", "name": "Static-Real-10", "type": "static", "w_bits": 8, "a_bits": 8, "data": "real", "samples": 10},
+    {"id": "W8A8-V100", "name": "Static-Real-100", "type": "static", "w_bits": 8, "a_bits": 8, "data": "real", "samples": 100},
+    {"id": "W8A8-V500", "name": "Static-Real-500", "type": "static", "w_bits": 8, "a_bits": 8, "data": "real", "samples": 500},
+    
+    # 4. Granularity Variable
+    {"id": "W8A8-Tensor", "name": "Per-Tensor-W8A8", "type": "per_tensor", "w_bits": 8, "a_bits": 8, "data": "real", "samples": 100},
+
+    # 5. Mixed Precision Static (Requested)
+    {"id": "W4A8", "name": "Static-W4A8", "type": "static", "w_bits": 4, "a_bits": 8, "data": "real", "samples": 500},
+    {"id": "W4A16", "name": "Static-W4A16", "type": "static", "w_bits": 4, "a_bits": 16, "data": "real", "samples": 500},
+    {"id": "W16A16", "name": "Static-W16A16", "type": "static", "w_bits": 16, "a_bits": 16, "data": "real", "samples": 500},
 ]
 
 
@@ -87,9 +59,9 @@ def run_experiments():
     golden_inputs = []
     golden_outputs = []
 
-    # Use real data for verification if possible, to measure realistic loss
-    # Using 100 samples for verification metrics
-    verify_gen = get_calibration_dataset("random", 100)
+    # Use real data for verification to measure realistic loss
+    # Using 500 samples for robust verification metrics
+    verify_gen = get_calibration_dataset("real", 500, shuffle=True)
     for inp_list in verify_gen:
         # inp_list: [numpy_array]
         inp_tensor = torch.from_numpy(inp_list[0])
@@ -111,94 +83,100 @@ def run_experiments():
         qt = quantizer.Quantizer(MODEL_FLOAT)
 
         # Apply Quantization Settings
-        if case["type"] == "fp32":
-            # Just copy float model
-            shutil.copy(MODEL_FLOAT, output_filename)
+        w_bits = case.get("w_bits", 8)
+        a_bits = case.get("a_bits", 32)
+        
+        try:
+            if case["type"] == "fp32":
+                # Just copy float model
+                shutil.copy(MODEL_FLOAT, output_filename)
 
-        elif case["type"] == "weight_only":
-            # Weight Only (Int8 Weight, Float Act)
-            qt.add_weight_only_config(
-                regex=".*",
-                operation_name=TFLOperationName.ALL_SUPPORTED,
-                num_bits=8,
-                granularity=QuantGranularity.CHANNELWISE,
-            )
-            q_res = qt.quantize()
-            q_res.save(
-                os.path.dirname(output_filename) or ".",
-                os.path.splitext(output_filename)[0],
-                overwrite=True,
-            )
+            elif case["type"] == "weight_only":
+                # Weight Only (Int/Float Weight, Float Act)
+                qt.add_weight_only_config(
+                    regex=".*",
+                    operation_name=TFLOperationName.ALL_SUPPORTED,
+                    num_bits=w_bits,
+                    granularity=QuantGranularity.CHANNELWISE,
+                )
+                q_res = qt.quantize()
+                q_res.save(
+                    os.path.dirname(output_filename) or ".",
+                    os.path.splitext(os.path.basename(output_filename))[0],
+                    overwrite=True,
+                )
 
-        elif case["type"] == "dynamic":
-            # Dynamic (Int8 Weight, Dynamic Act)
-            qt.add_dynamic_config(
-                regex=".*",
-                operation_name=TFLOperationName.ALL_SUPPORTED,
-                num_bits=8,
-                granularity=QuantGranularity.CHANNELWISE,
-            )
-            q_res = qt.quantize()
-            q_res.save(
-                os.path.dirname(output_filename) or ".",
-                os.path.splitext(output_filename)[0],
-                overwrite=True,
-            )
+            elif case["type"] == "dynamic":
+                # Dynamic (Int Weight, Dynamic Act)
+                qt.add_dynamic_config(
+                    regex=".*",
+                    operation_name=TFLOperationName.ALL_SUPPORTED,
+                    num_bits=w_bits,
+                    granularity=QuantGranularity.CHANNELWISE,
+                )
+                q_res = qt.quantize()
+                q_res.save(
+                    os.path.dirname(output_filename) or ".",
+                    os.path.splitext(os.path.basename(output_filename))[0],
+                    overwrite=True,
+                )
 
-        elif case["type"] in ["static", "full_int", "per_tensor"]:
-            # Static Quantization requires calibration
+            elif case["type"] in ["static", "full_int", "per_tensor"]:
+                # Static Quantization requires calibration
+                # Calibration Data Setup
+                calib_samples = case["samples"]
+                calib_dtype = case["data"]
 
-            # Calibration Data Setup
-            calib_samples = case["samples"]
-            calib_dtype = case["data"]
+                # Helper for input name
+                interpreter = tf.lite.Interpreter(model_path=MODEL_FLOAT)
+                input_details = interpreter.get_input_details()
+                sig_info = interpreter.get_signature_list()
 
-            # Helper for input name
-            interpreter = tf.lite.Interpreter(model_path=MODEL_FLOAT)
-            input_details = interpreter.get_input_details()
-            sig_info = interpreter.get_signature_list()
+                # Robust input name extraction
+                input_arg_name = "args_0"
+                sig_key = None
+                if sig_info:
+                    sig_key = list(sig_info.keys())[0]
+                    sig_inputs = sig_info[sig_key]["inputs"]
+                    if isinstance(sig_inputs, dict):
+                        input_arg_name = list(sig_inputs.keys())[0]
 
-            # Robust input name extraction
-            input_arg_name = "args_0"
-            sig_key = None
-            if sig_info:
-                sig_key = list(sig_info.keys())[0]
-                sig_inputs = sig_info[sig_key]["inputs"]
-                if isinstance(sig_inputs, dict):
-                    input_arg_name = list(sig_inputs.keys())[0]
+                def calib_gen():
+                    if calib_samples <= 0:
+                         return
+                    gen = get_calibration_dataset(calib_dtype, calib_samples)
+                    for data in gen:
+                        yield {input_arg_name: data[0]}
 
-            def calib_gen():
-                gen = get_calibration_dataset(calib_dtype, calib_samples)
-                for data in gen:
-                    yield {input_arg_name: data[0]}
+                calib_data: dict[str, Any] = {str(sig_key): calib_gen()}
 
-            # Explicit type hint to solve Pyright error
-            calib_data: dict[str, Any] = {str(sig_key): calib_gen()}
+                # Config
+                granularity = (
+                    QuantGranularity.TENSORWISE
+                    if case["type"] == "per_tensor"
+                    else QuantGranularity.CHANNELWISE
+                )
+                
+                qt.add_static_config(
+                    regex=".*",
+                    operation_name=TFLOperationName.ALL_SUPPORTED,
+                    activation_num_bits=a_bits,
+                    weight_num_bits=w_bits,
+                    weight_granularity=granularity,
+                )
 
-            # Config
-            granularity = (
-                QuantGranularity.TENSORWISE
-                if case["type"] == "per_tensor"
-                else QuantGranularity.CHANNELWISE
-            )
+                print(f"   Calibrating with {calib_samples} {calib_dtype} samples...")
+                calib_result = qt.calibrate(calib_data)
 
-            qt.add_static_config(
-                regex=".*",
-                operation_name=TFLOperationName.ALL_SUPPORTED,
-                activation_num_bits=8,
-                weight_num_bits=8,
-                weight_granularity=granularity,
-            )
-
-            print(f"   Calibrating with {calib_samples} {calib_dtype} samples...")
-            calib_result = qt.calibrate(calib_data)
-
-            q_res = qt.quantize(calib_result)
-
-            q_res.save(
-                os.path.dirname(output_filename) or ".",
-                os.path.splitext(output_filename)[0],
-                overwrite=True,
-            )
+                q_res = qt.quantize(calib_result)
+                q_res.save(
+                    os.path.dirname(output_filename) or ".",
+                    os.path.splitext(os.path.basename(output_filename))[0],
+                    overwrite=True,
+                )
+        except Exception as e:
+            print(f"   [SKIP] Experiment {cid} failed: {e}")
+            continue
 
         # 3. Verification & Metrics
         print(f"   Verifying {output_filename}...")
@@ -270,12 +248,13 @@ def run_experiments():
         print(
             f"   Stats -> MSE: {avg_mse:.6f}, SNR: {avg_snr:.2f} dB, Size: {f_size:.2f} MB, Latency: {avg_latency_ms:.2f} ms"
         )
-
         results.append(
             {
                 "Experiment ID": cid,
                 "Name": cname,
-                "Config": f"{case['type']}-{case['data']}-{case['samples']}",
+                "Config": f"{case['type']}-{w_bits}/{a_bits}",
+                "Weight Bits": w_bits,
+                "Activation Bits": a_bits,
                 "MSE": avg_mse,
                 "SNR (dB)": avg_snr,
                 "Cosine Sim": avg_cos,

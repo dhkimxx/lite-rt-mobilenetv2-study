@@ -2,6 +2,8 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, Subset
+from torchvision.datasets.utils import download_and_extract_archive
+from torchvision.datasets import ImageFolder
 import numpy as np
 import os
 from typing import Tuple, Generator, List, Dict, Union
@@ -12,6 +14,7 @@ def get_calibration_dataset(
     n_samples: int = 100,
     batch_size: int = 1,
     image_size: int = 224,
+    shuffle: bool = False,
 ) -> Generator[List[np.ndarray], None, None]:
     """
     Calibration을 위한 데이터 생성기 (Generator).
@@ -26,7 +29,9 @@ def get_calibration_dataset(
                 )
             ]
     else:
-        # Real Data (CIFAR10)
+        # Real Data (ImageNet-V2 Matched-Frequency)
+        # 1000 classes, 10 images per class (Total 10,000 images)
+        # Matches ImageNet distribution better than CIFAR-10
         transform = transforms.Compose(
             [
                 transforms.Resize((image_size, image_size)),
@@ -37,19 +42,37 @@ def get_calibration_dataset(
             ]
         )
 
-        # Download usually creates a folder. We put it in a temporary location or cache.
-        # Check if dataset exists, else download.
         root = "./data"
-        os.makedirs(root, exist_ok=True)
+        dataset_url = "https://huggingface.co/datasets/vaishaal/ImageNetV2/resolve/main/imagenetv2-matched-frequency.tar.gz"
+        dataset_folder = os.path.join(root, "imagenetv2-matched-frequency-format-val")
 
+        # Download & Extract if not exists
+        if not os.path.exists(dataset_folder):
+            print(f"[Setup] Downloading ImageNet-V2 from {dataset_url}...")
+            try:
+                download_and_extract_archive(
+                    url=dataset_url,
+                    download_root=root,
+                    extract_root=root,
+                    filename="imagenetv2-matched-frequency.tar.gz",
+                    remove_finished=True,
+                )
+                print("[Setup] Download complete.")
+            except Exception as e:
+                print(f"[Warning] ImageNet-V2 download failed ({e}). Fallback to Random.")
+                for _ in range(n_samples):
+                    yield [
+                        np.random.randn(batch_size, 3, image_size, image_size).astype(
+                            np.float32
+                        )
+                    ]
+                return
+
+        # Load Dataset using ImageFolder
         try:
-            dataset = torchvision.datasets.CIFAR10(
-                root=root, train=True, download=True, transform=transform
-            )
+            dataset = ImageFolder(root=dataset_folder, transform=transform)
         except Exception as e:
-            print(
-                f"Warning: CIFAR10 download failed ({e}). Falling back to Random data."
-            )
+            print(f"[Error] Failed to load ImageNet-V2 ({e}). Fallback to Random.")
             for _ in range(n_samples):
                 yield [
                     np.random.randn(batch_size, 3, image_size, image_size).astype(
@@ -59,7 +82,11 @@ def get_calibration_dataset(
             return
 
         # Subset for efficiency
-        indices = list(range(n_samples))
+        all_indices = list(range(len(dataset)))
+        if shuffle:
+            np.random.shuffle(all_indices)
+        
+        indices = all_indices[:n_samples]
         subset = Subset(dataset, indices)
         loader = DataLoader(subset, batch_size=batch_size, shuffle=False)
 
